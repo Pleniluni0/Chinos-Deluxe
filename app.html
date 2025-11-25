@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Los Chinos Deluxe - Gold Cup</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Vue 3 -->
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        import { getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, arrayUnion, deleteDoc } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js';
+
+        window.firebaseModules = {
+            initializeApp, getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken,
+            getFirestore, collection, doc, setDoc, onSnapshot, updateDoc, arrayUnion, deleteDoc
+        };
+        window.dispatchEvent(new Event('firebase-ready'));
+    </script>
+
+    <style>
+        @keyframes bounce-slow {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        .animate-bounce-slow { animation: bounce-slow 2s infinite; }
+        
+        .toast-enter-active, .toast-leave-active { transition: all 0.5s ease; }
+        .toast-enter-from, .toast-leave-to { opacity: 0; transform: translateY(-20px); }
+
+        [v-cloak] { display: none; }
+        
+        .loader {
+            border: 4px solid rgba(255, 255, 255, 0.1);
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            border-left-color: #eab308;
+            animation: spin 1s ease-in-out infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-slate-900 text-slate-100 font-sans overflow-hidden h-screen w-screen selection:bg-yellow-500 selection:text-black">
+
+<div id="app" v-cloak class="h-full flex flex-col relative">
+
+    <!-- TOAST NOTIFICATION -->
+    <transition name="toast">
+        <div v-if="toastMessage" class="absolute top-16 md:top-20 left-0 right-0 z-[70] flex justify-center pointer-events-none px-4">
+            <div class="bg-slate-900/95 border border-yellow-500 text-yellow-500 px-4 py-2 md:px-6 md:py-3 rounded-full shadow-2xl font-bold flex items-center gap-2 pointer-events-auto text-sm md:text-base text-center">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+                {{ toastMessage }}
+            </div>
+        </div>
+    </transition>
+
+    <!-- OVERLAY DE CARGA GLOBAL -->
+    <div v-if="loading" class="absolute inset-0 z-[80] bg-slate-900/90 backdrop-blur flex flex-col items-center justify-center">
+        <div class="loader mb-4"></div>
+        <p class="text-white font-bold animate-pulse">{{ loadingText }}</p>
+    </div>
+
+    <!-- HEADER -->
+    <header class="bg-slate-800 border-b border-slate-700 p-3 md:p-4 flex justify-between items-center shadow-lg z-50 shrink-0">
+        <div class="flex items-center gap-2">
+            <div class="bg-yellow-500 p-1.5 md:p-2 rounded-full">
+                <svg viewBox="0 0 24 24" fill="gold" class="w-5 h-5 md:w-6 md:h-6 text-slate-900" stroke="goldenrod" stroke-width="1">
+                    <circle cx="12" cy="12" r="9" />
+                    <text x="12" y="16" font-size="10" text-anchor="middle" fill="#b8860b" font-weight="bold">€</text>
+                </svg>
+            </div>
+            <h1 class="text-lg md:text-2xl font-bold bg-gradient-to-r from-yellow-400 to-yellow-600 bg-clip-text text-transparent">
+                Los Chinos Deluxe
+            </h1>
+        </div>
+        <div v-if="nickname" class="flex items-center gap-3">
+            <span class="hidden md:inline text-slate-400 text-sm">Jugador: <span class="text-white font-semibold">{{ nickname }}</span></span>
+            <button v-if="view !== 'login'" @click="leaveRoom" class="text-xs bg-red-900/50 hover:bg-red-800 text-red-200 border border-red-700 px-2 py-1 md:px-3 md:py-1.5 rounded transition flex items-center gap-1">
+                Salir
+            </button>
+        </div>
+    </header>
+
+    <!-- VIEWS CONTAINER -->
+    <main class="flex-1 relative w-full overflow-hidden flex flex-col">
+        
+        <!-- LOGIN -->
+        <div v-if="view === 'login'" class="flex-1 flex flex-col items-center justify-center p-4">
+            <div class="bg-slate-800 p-8 rounded-2xl shadow-2xl border border-slate-700 w-full max-w-md">
+                <h2 class="text-2xl mb-6 text-center text-yellow-500 font-bold">Bienvenido</h2>
+                <form @submit.prevent="handleLogin" class="flex flex-col gap-5">
+                    <div>
+                        <label class="text-sm text-slate-400 mb-1 block">Tu Apodo</label>
+                        <input v-model="nickname" type="text" class="w-full bg-slate-900 border border-slate-600 rounded-lg p-3 text-white focus:ring-2 focus:ring-yellow-500 outline-none" placeholder="Ej: El Padrino" required maxlength="15">
+                    </div>
+                    <button type="submit" class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 rounded-lg transition shadow-lg">
+                        Entrar
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- LOBBY -->
+        <div v-if="view === 'lobby'" class="flex-1 overflow-y-auto p-4 max-w-6xl mx-auto w-full">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-xl md:text-2xl font-bold">Salas Disponibles</h2>
+                <button @click="createRoom" class="bg-green-600 hover:bg-green-500 px-4 py-2 md:px-5 md:py-2.5 rounded-lg font-bold shadow-lg text-white flex items-center gap-2 transition active:scale-95 text-sm md:text-base">
+                    + Crear Sala
+                </button>
+            </div>
+
+            <div v-if="rooms.length === 0" class="text-center py-16 bg-slate-800/50 rounded-xl border-2 border-dashed border-slate-700">
+                <p class="text-slate-400">No hay salas. ¡Crea la primera!</p>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div v-for="room in rooms" :key="room.id" class="bg-slate-800 p-5 rounded-xl border border-slate-700 shadow hover:border-yellow-500/50 transition">
+                    <div class="flex justify-between items-start mb-3">
+                        <h3 class="font-bold text-xl text-white">Sala #{{ room.id }}</h3>
+                        <span class="text-xs bg-blue-900 text-blue-200 px-2.5 py-1 rounded font-mono">
+                            {{ room.players.length }}/{{ room.config.maxPlayers }}
+                        </span>
+                    </div>
+                    <button @click="joinRoom(room.id)" :disabled="room.players.length >= room.config.maxPlayers" class="w-full py-2.5 rounded-lg font-bold transition mt-4" :class="room.players.length >= room.config.maxPlayers ? 'bg-slate-700 cursor-not-allowed opacity-50' : 'bg-yellow-600 hover:bg-yellow-500 text-white'">
+                        {{ room.players.length >= room.config.maxPlayers ? 'Llena' : 'Unirse' }}
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- WAITING ROOM -->
+        <div v-if="view === 'room' && currentRoom && currentRoom.status === 'waiting'" class="flex-1 p-2 md:p-4 flex flex-col items-center justify-center min-h-0">
+            <div class="bg-slate-800 rounded-xl border border-slate-700 shadow-2xl w-full max-w-4xl flex flex-col md:flex-row overflow-hidden h-full md:h-[600px] max-h-full">
+                
+                <!-- Left: Info & Players -->
+                <div class="md:w-1/2 p-4 border-b md:border-b-0 md:border-r border-slate-700 flex flex-col h-[45%] md:h-full shrink-0">
+                    <div class="mb-2 md:mb-4 shrink-0">
+                        <span class="text-slate-400 text-xs md:text-sm">CÓDIGO DE SALA</span>
+                        <h2 class="text-2xl md:text-3xl font-bold text-yellow-500 truncate">{{ currentRoom.id }}</h2>
+                    </div>
+                    <h3 class="font-bold text-white mb-2 flex justify-between text-sm md:text-base shrink-0">
+                        Jugadores 
+                        <span class="text-xs bg-blue-600 px-2 py-1 rounded">{{ currentRoom.players.length }}/{{ currentRoom.config.maxPlayers }}</span>
+                    </h3>
+                    
+                    <ul class="flex-1 overflow-y-auto space-y-2 mb-2 pr-1">
+                        <li v-for="p in currentRoom.players" :key="p.playerId" class="flex items-center gap-2 bg-slate-700 p-2 rounded text-sm md:text-base">
+                            <div class="w-2 h-2 md:w-3 md:h-3 rounded-full" :class="p.isAI ? 'bg-purple-500' : 'bg-green-500'"></div>
+                            <span class="font-medium flex-1 truncate">{{ p.name }}</span>
+                            <span v-if="p.playerId === currentRoom.hostPlayerId" class="text-yellow-500 text-xs">👑</span>
+                        </li>
+                    </ul>
+
+                    <!-- Config -->
+                    <div v-if="isHost" class="bg-slate-900/50 p-2 md:p-4 rounded-lg space-y-2 shrink-0 text-xs md:text-sm">
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-300">Jugadores</span>
+                            <div class="flex items-center gap-2">
+                                <button @click="updateConfig('maxPlayers', currentRoom.config.maxPlayers - 1)" :disabled="currentRoom.config.maxPlayers <= 2" class="w-5 h-5 md:w-6 md:h-6 bg-slate-700 rounded text-white font-bold hover:bg-slate-600 disabled:opacity-50 flex items-center justify-center">-</button>
+                                <span class="w-4 text-center font-bold text-yellow-500">{{ currentRoom.config.maxPlayers }}</span>
+                                <button @click="updateConfig('maxPlayers', currentRoom.config.maxPlayers + 1)" :disabled="currentRoom.config.maxPlayers >= 10" class="w-5 h-5 md:w-6 md:h-6 bg-slate-700 rounded text-white font-bold hover:bg-slate-600 disabled:opacity-50 flex items-center justify-center">+</button>
+                            </div>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-slate-300">Rondas</span>
+                            <div class="flex items-center gap-2">
+                                <button @click="updateConfig('winningRounds', currentRoom.config.winningRounds - 1)" :disabled="currentRoom.config.winningRounds <= 1" class="w-5 h-5 md:w-6 md:h-6 bg-slate-700 rounded text-white font-bold hover:bg-slate-600 disabled:opacity-50 flex items-center justify-center">-</button>
+                                <span class="w-4 text-center font-bold text-yellow-500">{{ currentRoom.config.winningRounds }}</span>
+                                <button @click="updateConfig('winningRounds', currentRoom.config.winningRounds + 1)" :disabled="currentRoom.config.winningRounds >= 10" class="w-5 h-5 md:w-6 md:h-6 bg-slate-700 rounded text-white font-bold hover:bg-slate-600 disabled:opacity-50 flex items-center justify-center">+</button>
+                            </div>
+                        </div>
+                    </div>
+                     <div v-else class="bg-slate-900/50 p-2 rounded-lg text-center text-xs md:text-sm text-slate-400 shrink-0">
+                        Rondas para ganar: <span class="text-yellow-500 font-bold">{{currentRoom.config.winningRounds}}</span>
+                    </div>
+                </div>
+
+                <!-- Right: Chat & Start -->
+                <div class="md:w-1/2 flex flex-col bg-slate-900/30 flex-1 min-h-0">
+                    <div class="bg-slate-800 p-2 border-b border-slate-700 text-xs font-bold text-slate-400 uppercase tracking-wider shrink-0">Chat de Sala</div>
+                    
+                    <div class="flex-1 p-3 overflow-y-auto space-y-2" id="chat-box">
+                        <div v-if="!currentRoom.chat.length" class="text-center text-slate-500 italic mt-4 text-xs">Di hola...</div>
+                        <div v-for="(msg, i) in currentRoom.chat" :key="i" class="flex flex-col" :class="isMyMessage(msg) ? 'items-end' : 'items-start'">
+                            <div class="max-w-[90%] rounded-lg px-3 py-1.5 text-xs md:text-sm" :class="isMyMessage(msg) ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-200'">
+                                <span class="text-[10px] block font-bold opacity-75">{{ msg.sender }}</span>
+                                {{ msg.text }}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="p-2 md:p-3 bg-slate-800 border-t border-slate-700 shrink-0">
+                        <form @submit.prevent="sendMessage" class="flex gap-2 mb-2 md:mb-3">
+                            <input v-model="chatInput" type="text" placeholder="Escribe..." class="flex-1 bg-slate-900 border border-slate-600 rounded px-3 py-2 text-sm text-white focus:outline-none focus:border-yellow-500">
+                            <button type="submit" :disabled="!chatInput.trim()" class="bg-blue-600 px-3 py-2 rounded text-white disabled:opacity-50 text-sm">Env</button>
+                        </form>
+                        <button v-if="isHost" @click="startGame" class="w-full bg-green-600 hover:bg-green-500 py-2.5 md:py-3 rounded-lg font-bold text-white shadow-lg transition active:scale-95 text-sm md:text-base">
+                            INICIAR PARTIDA
+                        </button>
+                        <div v-else class="text-center text-yellow-500 animate-pulse font-medium p-2 text-sm">
+                            Esperando al anfitrión...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GAME -->
+        <div v-if="view === 'room' && currentRoom && currentRoom.status === 'playing'" class="absolute inset-0 bg-emerald-900/20">
+            <div class="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/felt.png')] opacity-20 pointer-events-none"></div>
+
+            <!-- Top HUD -->
+            <div class="absolute top-0 left-0 right-0 z-30 p-2 pointer-events-none flex justify-center">
+                <div class="bg-slate-800/90 backdrop-blur px-3 py-1.5 md:px-4 md:py-2 rounded-lg border border-slate-700 shadow-lg pointer-events-auto flex items-center gap-4 md:gap-6">
+                    <div>
+                        <span class="text-slate-400 text-[10px] md:text-xs uppercase block">Ronda</span>
+                        <span class="text-yellow-500 font-bold text-lg md:text-xl">{{ currentRoom.currentRound }}</span>
+                    </div>
+                    <div class="h-6 w-px bg-slate-600"></div>
+                    <div>
+                        <span class="text-slate-400 text-[10px] md:text-xs uppercase block">Fase</span>
+                        <span class="text-white font-bold uppercase tracking-wider text-xs md:text-sm" :class="phaseColor">{{ phaseText }}</span>
+                    </div>
+                    <div class="h-6 w-px bg-slate-600"></div>
+                    <div class="flex items-center gap-1 text-orange-400 font-mono text-lg md:text-xl font-bold">
+                         {{ timeLeft }}s
+                    </div>
+                </div>
+            </div>
+
+            <!-- Table Area -->
+            <div class="absolute inset-0 z-10 flex items-center justify-center pointer-events-none">
+                
+                <!-- Result Center -->
+                <div v-if="currentRoom.phase === 'result'" class="z-50 bg-slate-900/95 p-6 md:p-8 rounded-2xl border-2 border-yellow-500 shadow-2xl text-center pointer-events-auto animate-bounce-slow mx-4">
+                    <h3 class="text-slate-400 text-xs uppercase tracking-widest">Total Monedas</h3>
+                    <p class="text-6xl md:text-7xl font-black text-yellow-500 my-2 md:my-4">{{ totalTableCoins }}</p>
+                    <p v-if="roundWinnerName" class="text-green-400 font-bold text-xl md:text-2xl">¡{{ roundWinnerName }} gana!</p>
+                    <p v-else class="text-red-400 font-bold text-xl md:text-2xl">Nadie acertó</p>
+                    <button v-if="!amIReady" @click="markReady" class="mt-4 md:mt-6 bg-blue-600 hover:bg-blue-500 text-white font-bold py-2 px-6 rounded-lg shadow-lg w-full pointer-events-auto">
+                        ¡Listo!
+                    </button>
+                    <p v-else class="mt-2 md:mt-4 text-slate-500 text-sm">Esperando...</p>
+                </div>
+
+                <!-- Players -->
+                <div v-for="(p, i) in currentRoom.players" :key="p.playerId" 
+                     class="absolute flex flex-col items-center transition-all duration-500"
+                     :style="getPlayerStyle(i)"
+                     :class="{'z-40 scale-110': isPlayerTurn(i), 'z-20': !isPlayerTurn(i)}">
+                    
+                    <div v-if="p.guess !== -1" class="mb-1 md:mb-2 bg-white text-slate-900 font-black px-2 py-0.5 md:px-3 md:py-1 rounded-lg shadow-lg border-2 border-slate-300 text-sm md:text-base">
+                        {{ p.guess }}
+                    </div>
+
+                    <div class="relative drop-shadow-2xl">
+                        <div v-if="currentRoom.phase === 'result'">
+                            <svg viewBox="0 0 100 100" class="w-16 h-16 md:w-24 md:h-24">
+                                <g filter="drop-shadow(2px 4px 6px rgba(0,0,0,0.5))">
+                                    <path d="M25,60 Q15,50 10,35 Q10,25 20,25 L25,50 L28,20 Q30,10 40,10 L42,50 L50,08 Q55,05 62,10 L60,50 L75,15 Q85,15 82,30 L75,55 L90,45 Q95,55 85,70 Q75,85 50,95 Q25,85 25,60 Z" fill="#e0b590" stroke="#8d5a2e" stroke-width="2"/>
+                                    <circle v-if="p.coins >= 1" cx="50" cy="60" r="7" fill="gold" stroke="#b8860b" />
+                                    <circle v-if="p.coins >= 2" cx="35" cy="50" r="7" fill="gold" stroke="#b8860b" />
+                                    <circle v-if="p.coins >= 3" cx="65" cy="50" r="7" fill="gold" stroke="#b8860b" />
+                                </g>
+                            </svg>
+                        </div>
+                        <div v-else>
+                            <svg viewBox="0 0 100 100" class="w-16 h-16 md:w-24 md:h-24 transition-colors duration-300" :class="isPlayerTurn(i) ? 'text-yellow-200' : 'text-emerald-100'">
+                                <g filter="drop-shadow(2px 4px 6px rgba(0,0,0,0.5))">
+                                    <path d="M30,80 Q20,80 20,65 L20,40 Q20,25 35,20 L65,20 Q80,25 80,40 L80,65 Q80,80 70,80 Z" fill="#e0b590" stroke="#8d5a2e" stroke-width="2"/>
+                                    <path d="M20,50 Q10,60 30,70 L60,65" fill="none" stroke="#8d5a2e" stroke-width="3"/>
+                                </g>
+                            </svg>
+                            <div v-if="p.playerId === myPlayerId && (hasSelectedCoins || tempCoins !== null)" class="absolute top-1/2 -right-2 text-black text-xs md:text-sm font-bold w-5 h-5 md:w-6 md:h-6 rounded-full flex items-center justify-center border border-white z-50" :class="hasSelectedCoins ? 'bg-green-500' : 'bg-yellow-500'">
+                                {{ hasSelectedCoins ? p.coins : tempCoins }}
+                            </div>
+                            <div v-if="p.playerId !== myPlayerId && p.coins !== -1 && currentRoom.phase === 'selection'" class="absolute top-0 right-0 w-3 h-3 md:w-4 md:h-4 bg-green-500 rounded-full border border-white animate-bounce"></div>
+                        </div>
+                    </div>
+
+                    <div class="-mt-3 md:-mt-4 relative z-20 px-2 py-0.5 md:px-3 md:py-1 rounded-full font-bold flex items-center gap-2 shadow-lg border max-w-[100px] md:max-w-[120px]" 
+                         :class="isPlayerTurn(i) ? 'bg-yellow-500 text-black border-white ring-2 ring-yellow-500/50' : 'bg-slate-800 text-slate-200 border-slate-600'">
+                        <span class="text-[10px] md:text-xs truncate">{{ p.name }}</span>
+                        <span class="bg-black/20 text-current px-1.5 rounded text-[10px]">{{ p.score }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Controls (UNIVERSALLY COMPACT) -->
+            <div class="absolute bottom-0 left-0 right-0 z-40 p-2 md:p-4 pointer-events-none">
+                <div class="max-w-xl mx-auto pointer-events-auto">
+                    
+                    <!-- SELECTION (COMPACTO EN TODOS LOS DISPOSITIVOS) -->
+                    <div v-if="currentRoom.phase === 'selection' && !hasSelectedCoins" class="bg-slate-800/95 p-2 rounded-xl border border-slate-700 text-center shadow-2xl">
+                        <p class="text-slate-300 mb-2 text-sm font-medium">Esconde tus monedas</p>
+                        <div class="flex justify-center gap-2 mb-2">
+                            <button v-for="n in [0,1,2,3]" :key="n" @click="tempCoins = n" 
+                                class="w-10 h-10 rounded-lg font-bold text-lg transition-all shadow-md flex items-center justify-center"
+                                :class="tempCoins === n ? 'bg-yellow-500 text-black -translate-y-1' : 'bg-slate-700 hover:bg-slate-600 text-white'">
+                                {{ n }}
+                            </button>
+                        </div>
+                        <button @click="confirmCoins" :disabled="tempCoins === null" class="w-full bg-green-600 hover:bg-green-500 disabled:bg-slate-700 py-1.5 rounded-lg font-bold text-white text-sm transition">
+                            CONFIRMAR
+                        </button>
+                    </div>
+
+                    <!-- GUESSING (COMPACTO EN TODOS LOS DISPOSITIVOS) -->
+                    <div v-if="currentRoom.phase === 'guessing' && isMyTurn && !hasGuessedAlready" class="bg-slate-800/95 p-2 rounded-xl border border-slate-700 text-center shadow-2xl">
+                        <p class="text-green-400 font-bold mb-2 animate-pulse text-sm">¡TU TURNO! ADIVINA LA SUMA</p>
+                        <div class="flex flex-wrap justify-center gap-1.5">
+                            <button v-for="n in possibleGuesses" :key="n" 
+                                @click="makeGuess(n)" 
+                                :disabled="isGuessTaken(n)"
+                                class="w-8 h-8 rounded font-bold transition-all text-sm"
+                                :class="isGuessTaken(n) ? 'bg-slate-900 text-slate-600 cursor-not-allowed' : 'bg-slate-600 hover:bg-yellow-500 hover:text-black text-white'">
+                                {{ n }}
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <!-- Waiting Msg -->
+                    <div v-if="shouldShowWaitingMessage" class="bg-black/50 backdrop-blur p-1.5 rounded text-center text-slate-300 text-xs">
+                        {{ waitingMessage }}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GAME OVER -->
+        <div v-if="view === 'room' && currentRoom && currentRoom.status === 'game_over'" class="absolute inset-0 z-50 bg-slate-900/95 flex flex-col items-center justify-center p-4">
+             <div class="text-center animate-in zoom-in">
+                <!-- TROFEO DE CAMPEÓN SVG -->
+                <svg viewBox="0 0 24 24" fill="currentColor" class="w-24 h-24 text-yellow-500 mx-auto mb-6 animate-bounce drop-shadow-2xl">
+                    <path d="M17,2H7C5.9,2,5,2.9,5,4v3c0,1.7,1.3,3,3,3h1v1c0,1.7,1.3,3,3,3h2c1.7,0,3-1.3,3-3v-1h1c1.7,0,3-1.3,3-3V4C21,2.9,20.1,2,19,2z M8,8V4h9v4H8z M12,15c-0.6,0-1,0.4-1,1v2H9v2h6v-2h-2v-2C13,15.4,12.6,15,12,15z" />
+                </svg>
+                <h2 class="text-3xl md:text-5xl font-bold text-white mb-4">¡Partida Terminada!</h2>
+                <p class="text-xl md:text-2xl text-slate-300 mb-8">Ganador: <span class="text-yellow-400 font-bold text-2xl md:text-3xl">{{ getWinnerName() }}</span></p>
+                <button @click="leaveRoom" class="bg-slate-700 px-6 py-3 md:px-8 md:py-4 rounded-xl text-base md:text-lg font-bold hover:bg-slate-600 transition text-white shadow-xl">
+                    Volver al Menú
+                </button>
+            </div>
+        </div>
+
+    </main>
+</div>
+
+<script>
+    const { createApp } = Vue;
+
+    const PHASES = {
+        WAITING: 'waiting',
+        SELECTION: 'selection',
+        GUESSING: 'guessing',
+        RESULT: 'result',
+        GAME_OVER: 'game_over'
+    };
+    const TIMEOUTS = {
+        SELECTION: 15000,
+        GUESSING: 20000,
+        RESULT: 10000
+    };
+    
+    const HEROES = [
+        "GOKU", "VEGETA", "LUFFY", "ZORO", "NARUTO", "SASUKE", "SAITAMA", "GENOS",
+        "DEKU", "ALLMIGHT", "TANJIRO", "NEZUKO", "EREN", "MIKASA", "LEVI", "LIGHT",
+        "SPIKE", "FAYE", "SHINJI", "ASUKA", "REI", "KENSHIN", "INUYASHA", "KAGOME",
+        "YUSUKE", "GON", "KILLUA", "SEIYA", "USAGI", "SAKURA", "ASH", "PIKACHU",
+        "TOTORO", "CHIHIRO", "HOWL", "AKIRA", "TETSUO", "MOTOKO", "BATOU", "VASH",
+        "GUTS", "GRIFFITH", "MAZINGER", "GUNDAM", "DORAEMON", "OLIVER", "BENJI",
+        "VADER", "YODA", "LUKE", "LEIA", "HAN", "KIRK", "SPOCK", "PICARD", "RIPLEY",
+        "NEO", "TRINITY", "MORPHEUS", "TERMINATOR", "ROBOCOP", "MARTY", "DOC",
+        "HAL9000", "ET", "WALLE", "R2D2", "C3PO", "MANDO", "GROGU", "DUNE", "FREEMAN",
+        "SHEPARD", "CHIEF", "CORTANA"
+    ];
+
+    createApp({
+        data() {
+            const savedNick = localStorage.getItem('vue_chinos_nick') || '';
+            const savedRid = localStorage.getItem('vue_chinos_rid');
+            return {
+                auth: null, db: null, user: null,
+                appId: typeof __app_id !== 'undefined' ? __app_id : 'default-app-id',
+                view: savedRid ? 'room' : (savedNick ? 'lobby' : 'login'),
+                nickname: savedNick,
+                chatInput: '',
+                rooms: [],
+                currentRoom: null,
+                roomId: savedRid || null,
+                myPlayerId: this.getOrSetPlayerId(),
+                tempCoins: null,
+                timeLeft: 0,
+                timerInterval: null,
+                hostInterval: null,
+                toastMessage: null,
+                toastTimer: null,
+                loading: savedRid ? true : false,
+                loadingText: 'Cargando...',
+                windowWidth: window.innerWidth
+            }
+        },
+        watch: {
+            isHost(val) {
+                if(val && !this.hostInterval) {
+                    this.hostInterval = setInterval(this.runHostLogic, 1000);
+                } else if(!val && this.hostInterval) {
+                    clearInterval(this.hostInterval);
+                    this.hostInterval = null;
+                }
+            },
+            currentRoom: {
+                handler(newVal, oldVal) {
+                    if(this.loading && newVal) { this.loading = false; }
+                    
+                    if(!oldVal || !newVal) return;
+
+                    // --- DETECCION JUGADOR ABANDONA ---
+                    if (oldVal.players.length > newVal.players.length) {
+                        const left = oldVal.players.find(p => !newVal.players.some(np => np.playerId === p.playerId));
+                        if (left) this.showToast(`${left.name} ha abandonado la partida.`);
+                    }
+                    
+                    // --- DETECCION DE "ULTIMO HOMBRE EN PIE" ---
+                    if (newVal.status === 'playing' && newVal.players.length === 1 && !newVal.players[0].isAI) {
+                        this.runLastManStandingLogic();
+                        return;
+                    }
+
+                    if (newVal.status !== 'playing') return;
+                    
+                    const myP_old = oldVal.players.find(p => p.playerId === this.myPlayerId);
+                    const myP_new = newVal.players.find(p => p.playerId === this.myPlayerId);
+                    
+                    if(!myP_old || !myP_new) return;
+
+                    if (myP_old.coins === -1 && myP_new.coins !== -1 && this.tempCoins === null) {
+                        this.showToast(`¡Tiempo agotado! Se eligieron ${myP_new.coins} monedas.`);
+                        this.tempCoins = myP_new.coins; 
+                    }
+
+                    if (myP_old.guess === -1 && myP_new.guess !== -1 && this.timeLeft <= 2) {
+                        this.showToast(`¡Tiempo agotado! Has apostado ${myP_new.guess}.`);
+                    }
+                },
+                deep: true
+            }
+        },
+        computed: {
+            isHost() { return this.currentRoom && this.currentRoom.hostPlayerId === this.myPlayerId; },
+            myPlayerIndex() { return this.currentRoom ? this.currentRoom.players.findIndex(p => p.playerId === this.myPlayerId) : -1; },
+            hasSelectedCoins() { return this.myPlayerIndex !== -1 && this.currentRoom.players[this.myPlayerIndex].coins !== -1; },
+            hasGuessedAlready() { return this.myPlayerIndex !== -1 && this.currentRoom.players[this.myPlayerIndex].guess !== -1; },
+            isMyTurn() { return this.currentRoom && this.currentRoom.phase === PHASES.GUESSING && this.currentRoom.turnIndex === this.myPlayerIndex; },
+            amIReady() { return this.currentRoom && this.currentRoom.readyPlayers && this.currentRoom.readyPlayers.includes(this.myPlayerId); },
+            possibleGuesses() {
+                if(!this.currentRoom) return [];
+                const max = this.currentRoom.players.length * 3;
+                return Array.from({length: max + 1}, (_, i) => i);
+            },
+            phaseText() {
+                if(!this.currentRoom) return '';
+                switch(this.currentRoom.phase) {
+                    case PHASES.SELECTION: return 'Eligiendo';
+                    case PHASES.GUESSING: return 'Apuestas';
+                    case PHASES.RESULT: return 'Resultado';
+                    default: return '';
+                }
+            },
+            phaseColor() {
+                if(!this.currentRoom) return '';
+                switch(this.currentRoom.phase) {
+                    case PHASES.SELECTION: return 'text-blue-400';
+                    case PHASES.GUESSING: return 'text-green-400';
+                    case PHASES.RESULT: return 'text-yellow-500';
+                    default: return '';
+                }
+            },
+            totalTableCoins() { return this.currentRoom ? this.currentRoom.players.reduce((acc, p) => acc + (p.coins > -1 ? p.coins : 0), 0) : 0; },
+            roundWinnerName() {
+                if(!this.currentRoom || this.currentRoom.phase !== PHASES.RESULT) return null;
+                const winner = this.currentRoom.players.find(p => p.guess === this.totalTableCoins);
+                return winner ? winner.name : null;
+            },
+            shouldShowWaitingMessage() {
+                if(!this.currentRoom) return false;
+                if(this.currentRoom.phase === PHASES.SELECTION && this.hasSelectedCoins) return true;
+                if(this.currentRoom.phase === PHASES.GUESSING && !this.isMyTurn) return true;
+                return false;
+            },
+            waitingMessage() {
+                if(this.currentRoom.phase === PHASES.SELECTION) return "Esperando a que los demás elijan...";
+                if(this.currentRoom.phase === PHASES.GUESSING) {
+                    const activeP = this.currentRoom.players[this.currentRoom.turnIndex];
+                    return `Turno de ${activeP ? activeP.name : '...'}`;
+                }
+                return "";
+            }
+        },
+        mounted() {
+            if (window.firebaseModules) this.initFirebase();
+            else window.addEventListener('firebase-ready', this.initFirebase);
+            window.addEventListener('resize', () => { this.windowWidth = window.innerWidth; });
+        },
+        beforeUnmount() {
+            if(this.hostInterval) clearInterval(this.hostInterval);
+        },
+        methods: {
+            showToast(msg) {
+                this.toastMessage = msg;
+                if(this.toastTimer) clearTimeout(this.toastTimer);
+                this.toastTimer = setTimeout(() => { this.toastMessage = null; }, 3000);
+            },
+            async initFirebase() {
+                const fb = window.firebaseModules;
+                const config = JSON.parse(__firebase_config);
+                const app = fb.initializeApp(config);
+                this.auth = fb.getAuth(app);
+                this.db = fb.getFirestore(app);
+                
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) await fb.signInWithCustomToken(this.auth, __initial_auth_token);
+                else await fb.signInAnonymously(this.auth);
+                
+                fb.onAuthStateChanged(this.auth, (u) => {
+                    this.user = u;
+                    if(u) {
+                        this.listenToRooms();
+                        if (this.roomId) this.listenToCurrentRoom(this.roomId);
+                    }
+                });
+            },
+            getOrSetPlayerId() {
+                let pid = localStorage.getItem('vue_chinos_pid');
+                if(!pid) { pid = 'p_' + Math.random().toString(36).substr(2,9); localStorage.setItem('vue_chinos_pid', pid); }
+                return pid;
+            },
+            handleLogin() {
+                if(this.nickname) { localStorage.setItem('vue_chinos_nick', this.nickname); this.view = 'lobby'; }
+            },
+            listenToRooms() {
+                const fb = window.firebaseModules;
+                const roomsRef = fb.collection(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms');
+                fb.onSnapshot(roomsRef, (snapshot) => {
+                    this.rooms = snapshot.docs.map(d => ({id: d.id, ...d.data()})).filter(r => r.status === 'waiting');
+                });
+            },
+            listenToCurrentRoom(rid) {
+                const fb = window.firebaseModules;
+                const roomDoc = fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', rid);
+                this.unsubRoom = fb.onSnapshot(roomDoc, (snap) => {
+                    if(!snap.exists()) { this.leaveRoom(); return; }
+                    this.currentRoom = {id: snap.id, ...snap.data()};
+                    this.roomId = snap.id;
+                    if(this.currentRoom.phase === PHASES.SELECTION && this.currentRoom.players[this.myPlayerIndex]?.coins === -1) {
+                        this.tempCoins = null;
+                    }
+                    this.updateTimer();
+                }, (err) => {
+                    console.error("Error connecting to room", err);
+                    this.leaveRoom();
+                });
+            },
+            updateTimer() {
+                if(!this.currentRoom || !this.currentRoom.phaseEndTime) return;
+                const now = Date.now();
+                this.timeLeft = Math.max(0, Math.ceil((this.currentRoom.phaseEndTime - now) / 1000));
+                if(!this.timerInterval) {
+                    this.timerInterval = setInterval(() => {
+                        const n = Date.now();
+                        this.timeLeft = Math.max(0, Math.ceil((this.currentRoom.phaseEndTime - n) / 1000));
+                    }, 1000);
+                }
+            },
+            async createRoom() {
+                this.loading = true;
+                this.loadingText = 'Creando Sala...';
+                
+                const fb = window.firebaseModules;
+                const char = HEROES[Math.floor(Math.random() * HEROES.length)];
+                const num = Math.floor(Math.random() * 100);
+                const rid = `${char}-${num}`;
+                
+                const roomData = {
+                    hostId: this.user.uid, hostPlayerId: this.myPlayerId, status: 'waiting', phase: 'waiting',
+                    players: [{uid: this.user.uid, playerId: this.myPlayerId, name: this.nickname, score: 0, coins: -1, guess: -1, isAI: false}],
+                    config: { maxPlayers: 4, winningRounds: 3 }, chat: [], currentRound: 1, turnIndex: 0, startPlayerIndex: 0
+                };
+                
+                await fb.setDoc(fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', rid), roomData);
+                this.joinRoom(rid);
+            },
+            async joinRoom(rid) {
+                this.loading = true;
+                this.loadingText = 'Entrando...';
+                const fb = window.firebaseModules;
+                try {
+                    await fb.updateDoc(fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', rid), {
+                        players: fb.arrayUnion({uid: this.user.uid, playerId: this.myPlayerId, name: this.nickname, score: 0, coins: -1, guess: -1, isAI: false})
+                    });
+                    localStorage.setItem('vue_chinos_rid', rid);
+                    this.roomId = rid;
+                    this.view = 'room';
+                    this.listenToCurrentRoom(rid);
+                } catch(e) { 
+                    console.error("Cant join", e); 
+                    this.loading = false;
+                }
+            },
+            
+            // --- ACTUALIZADA: Salir Realmente de la DB ---
+            async leaveRoom() {
+                if(!this.roomId || !this.currentRoom) {
+                    this.localLeave();
+                    return;
+                }
+
+                const fb = window.firebaseModules;
+                const roomRef = fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', this.roomId);
+                
+                // 1. Filtrar jugador
+                const newPlayers = this.currentRoom.players.filter(p => p.playerId !== this.myPlayerId);
+                
+                // 2. Si no quedan humanos, borrar sala
+                const humanRemaining = newPlayers.filter(p => !p.isAI);
+                
+                if (humanRemaining.length === 0) {
+                    // Borrar sala
+                    try { await fb.deleteDoc(roomRef); } catch(e) {}
+                } else {
+                    // 3. Migración de Host si es necesario
+                    let updates = { players: newPlayers };
+                    
+                    if (this.isHost) {
+                        const nextHost = humanRemaining[0];
+                        updates.hostId = nextHost.uid;
+                        updates.hostPlayerId = nextHost.playerId;
+                    }
+                    
+                    // Guardar cambios
+                    try { await fb.updateDoc(roomRef, updates); } catch(e) {}
+                }
+
+                this.localLeave();
+            },
+            
+            // --- Nuevo: Lógica para último superviviente ---
+            async runLastManStandingLogic() {
+                // Solo si soy yo el último que queda
+                if (this.currentRoom.players.length === 1 && this.currentRoom.players[0].playerId === this.myPlayerId) {
+                    const fb = window.firebaseModules;
+                    const roomRef = fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', this.roomId);
+                    
+                    await fb.updateDoc(roomRef, {
+                        status: PHASES.GAME_OVER,
+                        winner: this.myPlayerId
+                    });
+                }
+            },
+
+            localLeave() {
+                localStorage.removeItem('vue_chinos_rid');
+                if(this.unsubRoom) this.unsubRoom();
+                this.currentRoom = null; this.roomId = null; this.view = 'lobby';
+                this.loading = false;
+            },
+            async sendMessage() {
+                if(!this.chatInput.trim()) return;
+                const fb = window.firebaseModules;
+                await fb.updateDoc(fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', this.roomId), {
+                    chat: fb.arrayUnion({sender: this.nickname, text: this.chatInput, uid: this.user.uid, playerId: this.myPlayerId})
+                });
+                this.chatInput = '';
+            },
+            isMyMessage(msg) { return msg.playerId === this.myPlayerId; },
+            async updateConfig(key, val) {
+                if(!this.isHost) return;
+                const fb = window.firebaseModules;
+                await fb.updateDoc(fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', this.roomId), { [`config.${key}`]: val });
+            },
+            async startGame() {
+                if(!this.isHost) return;
+                const fb = window.firebaseModules;
+                const players = [...this.currentRoom.players];
+                const needed = this.currentRoom.config.maxPlayers - players.length;
+                for(let i=0; i<needed; i++) {
+                    players.push({uid: 'bot'+i, playerId: 'bot'+Date.now()+i, name: 'Bot '+(i+1), score: 0, coins: -1, guess: -1, isAI: true});
+                }
+                await fb.updateDoc(fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', this.roomId), {
+                    players: players, status: 'playing', phase: PHASES.SELECTION, phaseEndTime: Date.now() + TIMEOUTS.SELECTION, startPlayerIndex: 0, turnIndex: 0
+                });
+            },
+            async confirmCoins() {
+                const fb = window.firebaseModules;
+                const players = [...this.currentRoom.players];
+                players[this.myPlayerIndex].coins = this.tempCoins;
+                await fb.updateDoc(fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', this.roomId), { players: players });
+            },
+            async makeGuess(num) {
+                const fb = window.firebaseModules;
+                const players = [...this.currentRoom.players];
+                players[this.myPlayerIndex].guess = num;
+                await fb.updateDoc(fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', this.roomId), {
+                    players: players, guessesTaken: fb.arrayUnion(num)
+                });
+            },
+            async markReady() {
+                const fb = window.firebaseModules;
+                await fb.updateDoc(fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', this.roomId), { readyPlayers: fb.arrayUnion(this.myPlayerId) });
+            },
+            isGuessTaken(n) { return this.currentRoom && this.currentRoom.guessesTaken && this.currentRoom.guessesTaken.includes(n); },
+            getPlayerStyle(index) {
+                const w = this.windowWidth; 
+                const total = this.currentRoom.players.length;
+                const myIdx = this.myPlayerIndex > -1 ? this.myPlayerIndex : 0;
+                const visualIndex = (index - myIdx + total) % total; 
+                const angleDeg = (visualIndex * (360 / total)) + 90;
+                const angleRad = angleDeg * (Math.PI / 180);
+                const radius = w < 600 ? 110 : 160;
+                return { transform: `translate(calc(-50% + ${radius * Math.cos(angleRad)}px), calc(-50% + ${radius * Math.sin(angleRad)}px))`, top: '50%', left: '50%' };
+            },
+            isPlayerTurn(index) { return this.currentRoom.phase === PHASES.GUESSING && this.currentRoom.turnIndex === index; },
+            getWinnerName() {
+                const p = this.currentRoom.players.find(p => p.playerId === this.currentRoom.winner);
+                return p ? p.name : 'Desconocido';
+            },
+            async runHostLogic() {
+                if(!this.currentRoom || this.currentRoom.status !== 'playing') return;
+                
+                // Check for instant win (1 player remaining)
+                if (this.currentRoom.players.length === 1 && !this.currentRoom.players[0].isAI) {
+                    const fb = window.firebaseModules;
+                    const roomRef = fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', this.roomId);
+                    await fb.updateDoc(roomRef, {
+                        status: PHASES.GAME_OVER,
+                        winner: this.currentRoom.players[0].playerId
+                    });
+                    return;
+                }
+
+                const now = Date.now();
+                const fb = window.firebaseModules;
+                const roomRef = fb.doc(this.db, 'artifacts', this.appId, 'public', 'data', 'rooms', this.roomId);
+                
+                // Seguridad: Si alguien se va y el turno queda fuera de rango, resetear
+                if (this.currentRoom.turnIndex >= this.currentRoom.players.length) {
+                     await fb.updateDoc(roomRef, { turnIndex: 0 });
+                     return;
+                }
+
+                // 1. SELECTION
+                if(this.currentRoom.phase === PHASES.SELECTION) {
+                    let players = [...this.currentRoom.players];
+                    let changed = false;
+                    const timeUp = now > this.currentRoom.phaseEndTime;
+
+                    players = players.map(p => {
+                        if(p.isAI && p.coins === -1) { changed = true; return {...p, coins: Math.floor(Math.random() * 4)}; }
+                        return p;
+                    });
+
+                    if(timeUp) {
+                        players = players.map(p => {
+                            if(p.coins === -1) { changed = true; return {...p, coins: Math.floor(Math.random()*4)}; }
+                            return p;
+                        });
+                    }
+                    if(changed) await fb.updateDoc(roomRef, { players });
+
+                    const allSelected = players.every(p => p.coins !== -1);
+                    if(allSelected) {
+                        const startIdx = this.currentRoom.startPlayerIndex || 0;
+                        await fb.updateDoc(roomRef, {
+                            phase: PHASES.GUESSING, phaseEndTime: Date.now() + TIMEOUTS.GUESSING, guessesTaken: [], turnIndex: startIdx
+                        });
+                    }
+                }
+                // 2. GUESSING
+                if(this.currentRoom.phase === PHASES.GUESSING) {
+                    const idx = this.currentRoom.turnIndex;
+                    const activeP = this.currentRoom.players[idx];
+                    const timeUp = now > this.currentRoom.phaseEndTime;
+
+                    if(!activeP) return;
+
+                    if(activeP.guess === -1 && (activeP.isAI || timeUp)) {
+                         const max = this.currentRoom.players.length * 3;
+                         const taken = this.currentRoom.guessesTaken || [];
+                         const available = [];
+                         for(let i=0; i<=max; i++) if(!taken.includes(i)) available.push(i);
+                         const guess = available.length > 0 ? available[Math.floor(Math.random()*available.length)] : 0;
+                         const players = [...this.currentRoom.players];
+                         players[idx].guess = guess;
+                         
+                         const allGuessed = players.every(p => p.guess !== -1);
+                         if(allGuessed) {
+                             await fb.updateDoc(roomRef, { players, guessesTaken: fb.arrayUnion(guess), phase: PHASES.RESULT, phaseEndTime: Date.now() + TIMEOUTS.RESULT });
+                         } else {
+                             await fb.updateDoc(roomRef, { players, guessesTaken: fb.arrayUnion(guess) });
+                         }
+                         return;
+                    }
+
+                    if (activeP.guess !== -1) {
+                        const players = [...this.currentRoom.players];
+                        const nextTurn = (idx + 1) % players.length;
+                        const allGuessed = players.every(p => p.guess !== -1);
+                        if(allGuessed) {
+                             await fb.updateDoc(roomRef, { phase: PHASES.RESULT, phaseEndTime: Date.now() + TIMEOUTS.RESULT });
+                        } else {
+                             await fb.updateDoc(roomRef, { turnIndex: nextTurn, phaseEndTime: Date.now() + TIMEOUTS.GUESSING });
+                        }
+                    }
+                }
+                // 3. RESULT
+                if(this.currentRoom.phase === PHASES.RESULT) {
+                    const humanPlayers = this.currentRoom.players.filter(p=>!p.isAI);
+                    const readyCount = this.currentRoom.readyPlayers ? this.currentRoom.readyPlayers.length : 0;
+                    const allReady = readyCount >= humanPlayers.length;
+                    const timeUp = now > this.currentRoom.phaseEndTime;
+                    
+                    if(allReady || timeUp) {
+                        const total = this.totalTableCoins;
+                        const winnerIdx = this.currentRoom.players.findIndex(p => p.guess === total);
+                        const players = [...this.currentRoom.players];
+                        let gameOver = false;
+                        let winnerId = null;
+
+                        if(winnerIdx !== -1) {
+                            players[winnerIdx].score++;
+                            if(players[winnerIdx].score >= this.currentRoom.config.winningRounds) {
+                                gameOver = true; winnerId = players[winnerIdx].playerId;
+                            }
+                        }
+
+                        if(gameOver) {
+                             await fb.updateDoc(roomRef, { players, status: PHASES.GAME_OVER, winner: winnerId });
+                        } else {
+                            players.forEach(p => { p.coins = -1; p.guess = -1; });
+                            const nextStart = (this.currentRoom.startPlayerIndex + 1) % players.length;
+                            await fb.updateDoc(roomRef, {
+                                players, phase: PHASES.SELECTION, currentRound: this.currentRoom.currentRound + 1,
+                                startPlayerIndex: nextStart, turnIndex: nextStart, phaseEndTime: Date.now() + TIMEOUTS.SELECTION,
+                                readyPlayers: [], guessesTaken: []
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>
